@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: #0b1326;
+  --color-surface-dim: #0b1326;
+  --color-surface-bright: #31394d;
+  --color-surface-container-lowest: #060e20;
+  --color-surface-container-low: #131b2e;
+  --color-surface-container: #171f33;
+  --color-surface-container-high: #222a3d;
+  --color-surface-container-highest: #2d3449;
+  --color-on-surface: #dae2fd;
+  --color-on-surface-variant: #c4c9ac;
+  --color-primary: #ffffff;
+  --color-primary-container: #c3f400;
+  --color-on-primary-container: #283500;
+  --color-primary-fixed: #c3f400;
+  --color-primary-fixed-dim: #abd600;
+  --color-secondary: #bfc5e4;
+  --color-secondary-container: #424862;
+  --color-on-secondary: #292f48;
+  --color-tertiary-fixed: #6ffbbe;
+  --color-tertiary-container: #6ffbbe;
+  --color-on-tertiary-container: #00734e;
+  --color-error: #ffb4ab;
+  --color-error-container: #93000a;
+  --color-on-error: #690005;
+  --color-outline: #8e9379;
+  --color-outline-variant: #444933;
+
+  --font-headline: "Barlow Condensed", sans-serif;
+  --font-display: "Barlow Condensed", sans-serif;
+  --font-stat: "Barlow Condensed", sans-serif;
+  --font-body: "Inter", sans-serif;
+}
+
+@layer base {
+  html, body {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #0b1326;
+    color: #dae2fd;
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Typography tokens matching design specs */
+.font-headline-md {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  line-height: 26px;
+  letter-spacing: 0.01em;
+  font-weight: 600;
+}
+
+.font-headline-lg {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 28px;
+  line-height: 32px;
+  letter-spacing: 0.01em;
+  font-weight: 700;
+}
+
+.font-headline-xl {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 40px;
+  line-height: 44px;
+  letter-spacing: 0.01em;
+  font-weight: 700;
+}
+
+.font-stat-numeral-md {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 32px;
+  line-height: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-stat-numeral-lg {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 48px;
+  line-height: 48px;
+  letter-spacing: -0.01em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.font-label-caps-sm {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+
+.font-label-caps-md {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  line-height: 16px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.font-body-sm {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.font-body-md {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.font-body-lg {
+  font-family: 'Inter', sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Hide scrollbars where needed */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Spacing and safe area support */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 16px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}

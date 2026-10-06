@@ -1,0 +1,6 @@
+{
+  "name": "PROKICK FC Academy",
+  "description": "Elite football academy touchline platform for squad access, tactical roll call, and interactive digital player pass registration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
