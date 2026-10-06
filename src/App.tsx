@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
-import { Player, AttendanceState, TrainingSession } from './types';
+import { Player, AttendanceState, SquadCategory, TrainingSession } from './types';
 import { INITIAL_PLAYERS } from './data/initialSquad';
 import { Header } from './components/Header';
 import { BottomNav, AppTab } from './components/BottomNav';
@@ -19,9 +19,29 @@ import { FieldSupportModal } from './components/FieldSupportModal';
 import { initAuth, googleSignIn, logoutGoogle } from './services/googleAuth';
 
 const STORAGE_KEY = 'prokick_fc_squad_players_v2';
+const AUTH_SESSION_KEY = 'prokick_portal_auth_session';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('access');
+  const [activeAttendanceSquad, setActiveAttendanceSquad] = useState<SquadCategory>('U-17 Academy');
+
+  // Gated Portal Access State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(AUTH_SESSION_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2800);
+  };
 
   // Google Workspace Authentication State
   const [googleUser, setGoogleUser] = useState<User | null>(null);
@@ -119,6 +139,41 @@ export default function App() {
     }
   }, [players]);
 
+  // Handle successful login
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    try {
+      sessionStorage.setItem(AUTH_SESSION_KEY, 'true');
+    } catch {
+      // Ignore
+    }
+    setCurrentTab('attendance');
+    showToast('Portal Access Granted! Welcome Coach Rajnish.');
+  };
+
+  // Handle terminal logout
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    try {
+      sessionStorage.removeItem(AUTH_SESSION_KEY);
+    } catch {
+      // Ignore
+    }
+    setCurrentTab('access');
+    showToast('Touchline Portal Locked. Please log in to regain access.');
+  };
+
+  // Tab switching guard - strictly locked until authenticated
+  const handleTabChange = (tab: AppTab) => {
+    if (!isAuthenticated) {
+      setCurrentTab('access');
+      return;
+    }
+    if (tab === 'attendance' || tab === 'registration') {
+      setCurrentTab(tab);
+    }
+  };
+
   // Update attendance state for a player
   const handleUpdatePlayerStatus = (playerId: string, newStatus: AttendanceState) => {
     setPlayers((prev) =>
@@ -161,6 +216,21 @@ export default function App() {
   // Register a newly enrolled recruit
   const handleRegisterPlayer = (newPlayer: Player) => {
     setPlayers((prev) => [newPlayer, ...prev]);
+    setActiveAttendanceSquad(newPlayer.squadCategory);
+  };
+
+  // Import players from Excel spreadsheet database
+  const handleImportPlayers = (importedPlayers: Player[]) => {
+    setPlayers((prev) => {
+      const existingNames = new Set(prev.map((p) => p.name.trim().toLowerCase()));
+      const uniqueNew = importedPlayers.filter((p) => !existingNames.has(p.name.trim().toLowerCase()));
+      const merged = [...uniqueNew, ...prev];
+      return merged;
+    });
+    if (importedPlayers.length > 0) {
+      setActiveAttendanceSquad(importedPlayers[0].squadCategory);
+    }
+    showToast(`Loaded ${importedPlayers.length} players from Excel into Squad Database!`);
   };
 
   // Clear all player data
@@ -175,13 +245,16 @@ export default function App() {
 
   // Compute header title based on current screen
   const getHeaderTitle = () => {
+    if (!isAuthenticated) {
+      return 'Staff Login';
+    }
     switch (currentTab) {
-      case 'access':
-        return 'Login / Access';
       case 'attendance':
         return 'Attendance';
       case 'registration':
         return 'Registration';
+      default:
+        return 'Attendance';
     }
   };
 
@@ -189,21 +262,28 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0b1326] text-[#dae2fd] flex flex-col selection:bg-[#c3f400] selection:text-[#161e00]">
+      {/* Toast Alert */}
+      {toastMessage && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-[#171f33] border border-[#c3f400] text-[#c3f400] px-4 py-2.5 rounded-xl shadow-2xl text-xs font-semibold uppercase tracking-wider flex items-center gap-2 animate-bounce max-w-[90vw]">
+          <span className="material-symbols-outlined text-[18px]">info</span>
+          <span className="truncate">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Header */}
       <Header
         title={getHeaderTitle()}
         onOpenCoachModal={() => setIsCoachModalOpen(true)}
+        isAuthenticated={isAuthenticated}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
       <main className="flex-1 w-full pt-16 bg-[#0b1326]">
         {currentTab === 'access' && (
           <AccessScreen
-            onLoginSuccess={() => setCurrentTab('attendance')}
+            onLoginSuccess={handleLoginSuccess}
             onOpenFieldSupport={() => setIsFieldSupportOpen(true)}
-            onGoogleSignIn={handleGoogleSignIn}
-            googleUser={googleUser}
-            isLoggingInGoogle={isLoggingInGoogle}
           />
         )}
 
@@ -214,32 +294,40 @@ export default function App() {
             onUpdatePlayerNote={handleUpdatePlayerNote}
             onOpenPlayerModal={(player) => setSelectedPlayer(player)}
             onOpenSessionModal={() => setIsSessionModalOpen(true)}
-            onGoToRegistration={() => setCurrentTab('registration')}
+            onGoToRegistration={() => handleTabChange('registration')}
             onClearAllPlayers={handleClearAllPlayers}
             currentSession={currentSession}
             googleToken={googleToken}
             onGoogleSignIn={handleGoogleSignIn}
+            defaultSquadTab={activeAttendanceSquad}
+            onImportPlayers={handleImportPlayers}
           />
         )}
 
         {currentTab === 'registration' && (
           <RegistrationScreen
             onRegisterPlayer={handleRegisterPlayer}
-            onGoToAttendance={() => setCurrentTab('attendance')}
+            onGoToAttendance={(category) => {
+              if (category) setActiveAttendanceSquad(category);
+              handleTabChange('attendance');
+            }}
             googleToken={googleToken}
             googleUser={googleUser}
             onGoogleSignIn={handleGoogleSignIn}
             onGoogleSignOut={handleGoogleSignOut}
             isLoggingInGoogle={isLoggingInGoogle}
+            allPlayers={players}
+            onImportPlayers={handleImportPlayers}
           />
         )}
       </main>
 
-      {/* Fixed Bottom Navigation */}
+      {/* Fixed Bottom Navigation with Gated Access */}
       <BottomNav
         currentTab={currentTab}
-        onTabChange={setCurrentTab}
+        onTabChange={handleTabChange}
         squadCount={squadCount}
+        isAuthenticated={isAuthenticated}
       />
 
       {/* Modals */}

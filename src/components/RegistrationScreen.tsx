@@ -1,4 +1,4 @@
-import React, { useState, useId, useEffect } from 'react';
+import React, { useState, useId, useEffect, useRef } from 'react';
 import { User } from 'firebase/auth';
 import { PositionCode, Player, SquadCategory } from '../types';
 import { CLUB_ASSETS } from '../data/initialSquad';
@@ -7,15 +7,18 @@ import {
   getCachedSpreadsheetUrl,
   SheetAppendResult,
 } from '../services/googleSheets';
+import { exportRegistrationsToExcel, importPlayersFromExcel } from '../services/excelExport';
 
 interface RegistrationScreenProps {
   onRegisterPlayer: (newPlayer: Player) => void;
-  onGoToAttendance: () => void;
+  onGoToAttendance: (category?: SquadCategory) => void;
   googleToken: string | null;
   googleUser: User | null;
   onGoogleSignIn: () => Promise<any>;
   onGoogleSignOut: () => Promise<void>;
   isLoggingInGoogle: boolean;
+  allPlayers: Player[];
+  onImportPlayers?: (importedPlayers: Player[]) => void;
 }
 
 export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
@@ -26,6 +29,8 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
   onGoogleSignIn,
   onGoogleSignOut,
   isLoggingInGoogle,
+  allPlayers,
+  onImportPlayers,
 }) => {
   const [fullName, setFullName] = useState('Lucas Silva');
   const [nickname, setNickname] = useState('Speedy');
@@ -48,6 +53,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [enrollSuccess, setEnrollSuccess] = useState(false);
+  const [lastEnrolledPlayer, setLastEnrolledPlayer] = useState<Player | null>(null);
   const [lastSheetResult, setLastSheetResult] = useState<SheetAppendResult | null>(null);
   const [cachedSheetUrl, setCachedSheetUrl] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -134,6 +140,35 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
     }
   };
 
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportExcelFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const imported = await importPlayersFromExcel(file);
+      if (imported.length > 0 && onImportPlayers) {
+        onImportPlayers(imported);
+        showToast(`Loaded ${imported.length} players from Excel into Attendance roster!`);
+      } else {
+        showToast('No valid players found in the selected Excel file.');
+      }
+    } catch (err: any) {
+      console.error('Failed to import Excel:', err);
+      showToast(err.message || 'Failed to parse Excel file.');
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleDownloadExcel = () => {
+    const playerList = lastEnrolledPlayer
+      ? [lastEnrolledPlayer, ...allPlayers.filter((p) => p.id !== lastEnrolledPlayer.id)]
+      : allPlayers;
+    exportRegistrationsToExcel(playerList, 'PROKICK_FC_Academy');
+    showToast('Microsoft Excel (.xlsx) file downloaded!');
+  };
+
   const handleEnrollSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) {
@@ -163,7 +198,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
         trainingSlot === 'A' ? 'Morning Session (Main Pitch A)' : 'Evening Session (Field B)'
       } • Kit Size ${kitSize}`,
       noteIcon: 'badge',
-      division: divisionBracket,
+      division: `${squadCategory} (${estimatedAge} yrs)`,
       kitSize: kitSize,
       emergencyContact: {
         guardianName: guardianName.trim(),
@@ -176,7 +211,9 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
       matchFitnessRating: 95,
     };
 
-    // 1. Add player to live app attendance roster
+    setLastEnrolledPlayer(newPlayer);
+
+    // 1. Add player to live app attendance roster and local storage database (No auto-download prompt)
     onRegisterPlayer(newPlayer);
 
     // 2. If Google Sheets OAuth is active, append row to Google Sheet
@@ -190,13 +227,13 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
         });
         setLastSheetResult(sheetResult);
         setCachedSheetUrl(sheetResult.spreadsheetUrl);
-        showToast('Player enrolled & appended to Google Sheet!');
+        showToast('Player enrolled into database & synced to Google Sheets!');
       } catch (sheetErr: any) {
         console.error('Failed to append to Google Sheet:', sheetErr);
-        showToast(`Roster updated. Google Sheet note: ${sheetErr.message || 'Check connection'}`);
+        showToast('Player enrolled into squad database & Attendance roster!');
       }
     } else {
-      showToast('Player enrolled into live roster! (Connect Google Sheet below to sync)');
+      showToast('Player enrolled into squad database & Attendance roster!');
     }
 
     setIsSubmitting(false);
@@ -213,89 +250,98 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
         </div>
       )}
 
-      {/* Google Sheets Live Integration Status Bar */}
-      <div className="px-4 pb-2">
-        <div className="bg-[#171f33] border border-[#2d3449] rounded-xl p-3 shadow-md flex flex-col gap-2 relative overflow-hidden">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                <path
-                  fill="#0F9D58"
-                  d="M19.5 3h-15C3.67 3 3 3.67 3 4.5v15c0 .83.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5z"
-                />
-                <path
-                  fill="#FFF"
-                  d="M14 6H7v12h10V9l-3-3zm-1 3.5V7l2.5 2.5H13zm-4 4.5h6v1.5H9V14zm0-2h6v1.5H9V12z"
-                />
-              </svg>
-              <div className="flex flex-col min-w-0">
-                <span className="font-label-caps-sm text-[11px] uppercase tracking-wider text-[#dae2fd] font-bold truncate">
-                  Google Sheets Cloud Sync
-                </span>
-                <span className="font-body-sm text-[10px] text-[#bfc5e4] truncate">
-                  {googleToken
-                    ? `Connected: ${googleUser?.email || 'Active Account'}`
-                    : 'Sign in to auto-record registrations in Google Sheets'}
-                </span>
-              </div>
-            </div>
+      {/* Top MS Excel & Spreadsheet Management Bar */}
+      <div className="px-4 pb-2 flex flex-col gap-2">
+        {/* Hidden Excel File Input for Import */}
+        <input
+          ref={importFileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={handleImportExcelFile}
+          className="hidden"
+        />
 
-            {googleToken ? (
-              <div className="flex items-center gap-1.5 shrink-0">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#003824] border border-[#4edea3]/40 text-[#6ffbbe] font-label-caps-sm text-[9px] uppercase font-bold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#4edea3] animate-pulse"></span>
-                  Active
-                </span>
-                <button
-                  type="button"
-                  onClick={onGoogleSignOut}
-                  className="text-[10px] uppercase text-[#bfc5e4] hover:text-[#ffb4ab] px-1.5 py-0.5 rounded bg-[#222a3d]"
-                  title="Disconnect Google Account"
-                >
-                  Disconnect
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={onGoogleSignIn}
-                disabled={isLoggingInGoogle}
-                className="h-8 px-2.5 rounded-lg bg-[#c3f400] text-[#161e00] font-label-caps-sm text-[10px] uppercase tracking-wider font-extrabold flex items-center gap-1 shrink-0 shadow-sm hover:shadow-[0_0_12px_rgba(195,244,0,0.3)] transition-all cursor-pointer"
-              >
-                {isLoggingInGoogle ? (
-                  <>
-                    <span className="material-symbols-outlined text-[13px] animate-spin">
-                      progress_activity
-                    </span>
-                    <span>Connecting...</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="material-symbols-outlined text-[14px]">link</span>
-                    <span>Connect Sheets</span>
-                  </>
-                )}
-              </button>
-            )}
+        <div className="bg-[#171f33] border border-[#2d3449] rounded-xl p-3 shadow-md flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-[#107C41]/20 border border-[#107C41]/50 flex items-center justify-center text-[#6ffbbe] shrink-0">
+              <span className="material-symbols-outlined text-[20px]">
+                table_view
+              </span>
+            </div>
+            <div className="flex flex-col min-w-0">
+              <span className="font-label-caps-sm text-[11px] uppercase tracking-wider text-[#dae2fd] font-bold truncate">
+                MS Excel Database
+              </span>
+              <span className="font-body-sm text-[10px] text-[#bfc5e4] truncate">
+                {allPlayers.length} records saved • Import / Export on demand
+              </span>
+            </div>
           </div>
 
-          {/* Active Spreadsheet Link if available */}
-          {(lastSheetResult?.spreadsheetUrl || cachedSheetUrl) && (
-            <div className="pt-2 border-t border-[#222a3d] flex items-center justify-between gap-2">
-              <span className="text-[11px] text-[#6ffbbe] truncate flex items-center gap-1">
-                <span className="material-symbols-outlined text-[14px]">table_chart</span>
-                PROKICK FC Academy - Registrations 2025/26
-              </span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => importFileInputRef.current?.click()}
+              className="h-8 px-2.5 rounded-lg bg-[#222a3d] hover:bg-[#31394d] border border-[#2d3449] text-[#dae2fd] font-label-caps-sm text-[11px] uppercase tracking-wider font-extrabold flex items-center gap-1 shrink-0 shadow-sm active:scale-95 transition-all cursor-pointer"
+              title="Import players from an existing Excel sheet (.xlsx)"
+            >
+              <span className="material-symbols-outlined text-[15px] text-[#c3f400]">upload_file</span>
+              <span>Import</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              className="h-8 px-3 rounded-lg bg-[#107C41] hover:bg-[#107C41]/80 text-white font-label-caps-sm text-[11px] uppercase tracking-wider font-extrabold flex items-center gap-1.5 shrink-0 shadow-sm active:scale-95 transition-all cursor-pointer"
+              title="Download registrations in Microsoft Excel format"
+            >
+              <span className="material-symbols-outlined text-[15px]">file_download</span>
+              <span>Export</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Google Sheets Sync Bar */}
+        <div className="bg-[#131b2e] border border-[#222a3d] rounded-xl px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#0F9D58"
+                d="M19.5 3h-15C3.67 3 3 3.67 3 4.5v15c0 .83.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5z"
+              />
+              <path
+                fill="#FFF"
+                d="M14 6H7v12h10V9l-3-3zm-1 3.5V7l2.5 2.5H13zm-4 4.5h6v1.5H9V14zm0-2h6v1.5H9V12z"
+              />
+            </svg>
+            <span className="text-[10px] text-[#bfc5e4] truncate">
+              {googleToken
+                ? `Google Sheets: Connected (${googleUser?.email || 'Active'})`
+                : 'Cloud Google Sheets available'}
+            </span>
+          </div>
+
+          {googleToken ? (
+            (lastSheetResult?.spreadsheetUrl || cachedSheetUrl) && (
               <a
                 href={lastSheetResult?.spreadsheetUrl || cachedSheetUrl!}
                 target="_blank"
                 rel="noreferrer"
-                className="font-label-caps-sm text-[10px] uppercase tracking-wider text-[#c3f400] hover:underline flex items-center gap-0.5 shrink-0 font-bold"
+                className="font-label-caps-sm text-[10px] uppercase text-[#c3f400] hover:underline flex items-center gap-0.5 shrink-0 font-bold"
               >
-                <span>Open Sheet</span>
+                <span>View Sheet</span>
                 <span className="material-symbols-outlined text-[12px]">open_in_new</span>
               </a>
-            </div>
+            )
+          ) : (
+            <button
+              type="button"
+              onClick={onGoogleSignIn}
+              disabled={isLoggingInGoogle}
+              className="text-[10px] uppercase font-bold text-[#c3f400] hover:underline cursor-pointer"
+            >
+              {isLoggingInGoogle ? 'Connecting...' : 'Connect'}
+            </button>
           )}
         </div>
       </div>
@@ -363,7 +409,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
                     OFFICIAL RECRUIT
                   </span>
                   <span className="font-label-caps-sm text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded bg-[#6ffbbe]/20 text-[#6ffbbe] font-bold">
-                    PROSPECT
+                    {squadCategory}
                   </span>
                 </div>
 
@@ -373,7 +419,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
 
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-label-caps-sm text-[10px] px-2 py-0.5 rounded-full bg-[#c3f400] text-[#161e00] font-extrabold uppercase">
-                    {divisionBracket}
+                    {squadCategory} ({estimatedAge} yrs)
                   </span>
                   <span className="font-label-caps-sm text-[11px] text-[#bfc5e4] truncate">
                     {getPositionLabel(selectedPosition)}
@@ -432,37 +478,41 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
                   Player Enrolled &amp; Pass Active!
                 </span>
                 <span className="font-body-sm text-xs text-[#dae2fd]">
-                  {fullName} has been added to the touchline attendance roster.
+                  {fullName} is now active on the {squadCategory} Attendance roster.
                 </span>
               </div>
             </div>
             <button
               type="button"
-              onClick={onGoToAttendance}
+              onClick={() => onGoToAttendance(squadCategory)}
               className="px-3 py-1.5 rounded-lg bg-[#c3f400] text-[#161e00] font-label-caps-sm text-[11px] uppercase font-extrabold cursor-pointer hover:bg-white shrink-0"
             >
               Go to Roll Call
             </button>
           </div>
 
-          {/* Google Sheets Confirmation row */}
-          {lastSheetResult && (
-            <div className="pt-2 border-t border-[#005236] flex items-center justify-between text-xs">
-              <span className="text-[#6ffbbe] flex items-center gap-1">
-                <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                Appended to Google Sheet row successfully
-              </span>
+          {/* MS Excel & Google Sheets Download Row */}
+          <div className="pt-2 border-t border-[#005236] flex flex-wrap items-center justify-between gap-2 text-xs">
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#107C41] text-white font-label-caps-sm text-[10px] uppercase font-bold hover:bg-[#107C41]/80 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[13px]">download</span>
+              <span>Download Excel (.xlsx)</span>
+            </button>
+
+            {lastSheetResult && (
               <a
                 href={lastSheetResult.spreadsheetUrl}
                 target="_blank"
                 rel="noreferrer"
                 className="text-[#c3f400] hover:underline flex items-center gap-0.5 font-bold uppercase text-[10px]"
               >
-                <span>View Sheet</span>
-                <span className="material-symbols-outlined text-[12px]">open_in_new</span>
+                <span>Google Sheet ↗</span>
               </a>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
@@ -634,17 +684,17 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
             </div>
           </div>
 
-          {/* Squad Category Selector */}
+          {/* Squad / Age Category Selector */}
           <div className="flex flex-col gap-1.5">
             <label className="font-label-caps-sm text-[11px] uppercase tracking-wider text-[#bfc5e4]">
-              Assigned Squad Category *
+              Assigned Age Category *
             </label>
             <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  'U-17 Academy',
-                  'U-15 Boys',
                   'U-10 kids',
+                  'U-15 Boys',
+                  'U-17 Academy',
                   'Girls Elite',
                   'U-19 Reserves',
                 ] as const
@@ -893,7 +943,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
           </div>
 
           {/* Guardian & Emergency Contact Card */}
-          <div className="p-3.5 rounded-xl bg-[#171f33] border border-[#222a3d] flex flex-col gap-3">
+          <div className="p-3.5 rounded-xl bg-[#171f33] border border-[#2d3449] flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[#c3f400] text-[20px]">
@@ -1025,7 +1075,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
                 Guardian confirms Academy Code of Conduct &amp; Medical Waiver
               </span>
               <span className="font-body-sm text-[11px] text-[#bfc5e4] mt-0.5">
-                Includes match insurance, hydration guidelines, media release consent, and cloud spreadsheet record storage.
+                Includes match insurance, hydration guidelines, media release consent, and automated MS Excel (.xlsx) record generation.
               </span>
             </div>
           </label>
@@ -1042,9 +1092,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
                   progress_activity
                 </span>
                 <span>
-                  {googleToken
-                    ? 'SYNCING TO GOOGLE SHEETS & ENROLLING...'
-                    : 'GENERATING ACADEMY PASS...'}
+                  SAVING TO MS EXCEL &amp; ENROLLING...
                 </span>
               </span>
             ) : (
@@ -1060,7 +1108,7 @@ export const RegistrationScreen: React.FC<RegistrationScreenProps> = ({
           <div className="flex items-center justify-center gap-1.5 text-[#bfc5e4]">
             <span className="material-symbols-outlined text-[14px]">lock</span>
             <span className="font-label-caps-sm text-[10px] uppercase tracking-widest">
-              PROKICK FC Encrypted Registration Gateway • Google Sheets Connected
+              PROKICK FC Encrypted Registration Gateway • MS Excel (.xlsx) Ready
             </span>
           </div>
         </div>

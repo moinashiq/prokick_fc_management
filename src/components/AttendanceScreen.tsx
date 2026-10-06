@@ -1,6 +1,7 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Player, AttendanceState, SquadCategory, TrainingSession } from '../types';
 import { getCachedSpreadsheetUrl } from '../services/googleSheets';
+import { exportRegistrationsToExcel, importPlayersFromExcel } from '../services/excelExport';
 
 interface AttendanceScreenProps {
   players: Player[];
@@ -13,6 +14,8 @@ interface AttendanceScreenProps {
   currentSession: TrainingSession;
   googleToken: string | null;
   onGoogleSignIn: () => Promise<any>;
+  defaultSquadTab?: SquadCategory;
+  onImportPlayers?: (importedPlayers: Player[]) => void;
 }
 
 export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
@@ -26,9 +29,13 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
   currentSession,
   googleToken,
   onGoogleSignIn,
+  defaultSquadTab,
+  onImportPlayers,
 }) => {
   const [selectedDay, setSelectedDay] = useState<number>(16);
-  const [selectedSquad, setSelectedSquad] = useState<SquadCategory>('U-17 Academy');
+  const [selectedSquad, setSelectedSquad] = useState<SquadCategory>(
+    defaultSquadTab || 'U-17 Academy'
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'kit' | 'name' | 'fit'>('kit');
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -37,6 +44,32 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [markAllSuccess, setMarkAllSuccess] = useState(false);
   const [sheetUrl, setSheetUrl] = useState<string | null>(null);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportExcelFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const imported = await importPlayersFromExcel(file);
+      if (imported.length > 0 && onImportPlayers) {
+        onImportPlayers(imported);
+        showToast(`Loaded ${imported.length} players from Excel into Attendance roster!`);
+      } else {
+        showToast('No valid player rows found in Excel spreadsheet.');
+      }
+    } catch (err: any) {
+      console.error('Failed to import Excel:', err);
+      showToast(err.message || 'Error parsing Excel spreadsheet.');
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  useEffect(() => {
+    if (defaultSquadTab) {
+      setSelectedSquad(defaultSquadTab);
+    }
+  }, [defaultSquadTab]);
 
   useEffect(() => {
     setSheetUrl(getCachedSpreadsheetUrl());
@@ -101,6 +134,15 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
     }, 2000);
   };
 
+  const handleExportExcel = () => {
+    if (players.length === 0) {
+      showToast('No registered players to export yet');
+      return;
+    }
+    exportRegistrationsToExcel(players, 'PROKICK_FC_Academy');
+    showToast('Microsoft Excel (.xlsx) file downloaded!');
+  };
+
   const handleExportCSV = () => {
     if (currentCategoryPlayers.length === 0) {
       showToast('No players to export yet');
@@ -148,7 +190,7 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
     setIsSyncing(true);
     setTimeout(() => {
       setIsSyncing(false);
-      showToast('Touchline Station & Google Sheets Cloud synchronized');
+      showToast('Touchline Station, MS Excel & Cloud synchronized');
     }, 900);
   };
 
@@ -171,16 +213,16 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
   // Dynamic squad tabs reflecting actual counts for each category
   const squadTabs: { label: SquadCategory; count: number }[] = [
     {
-      label: 'U-17 Academy',
-      count: players.filter((p) => p.squadCategory === 'U-17 Academy').length,
+      label: 'U-10 kids',
+      count: players.filter((p) => p.squadCategory === 'U-10 kids').length,
     },
     {
       label: 'U-15 Boys',
       count: players.filter((p) => p.squadCategory === 'U-15 Boys').length,
     },
     {
-      label: 'U-10 kids',
-      count: players.filter((p) => p.squadCategory === 'U-10 kids').length,
+      label: 'U-17 Academy',
+      count: players.filter((p) => p.squadCategory === 'U-17 Academy').length,
     },
     {
       label: 'Girls Elite',
@@ -202,48 +244,63 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
         </div>
       )}
 
-      {/* Google Sheets Link Bar if connected */}
-      {(sheetUrl || googleToken) && (
-        <div className="px-4 pb-2">
-          <div className="bg-[#171f33] border border-[#2d3449] rounded-xl px-3 py-2 shadow-sm flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                <path
-                  fill="#0F9D58"
-                  d="M19.5 3h-15C3.67 3 3 3.67 3 4.5v15c0 .83.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5z"
-                />
-                <path
-                  fill="#FFF"
-                  d="M14 6H7v12h10V9l-3-3zm-1 3.5V7l2.5 2.5H13zm-4 4.5h6v1.5H9V14zm0-2h6v1.5H9V12z"
-                />
-              </svg>
-              <span className="text-[11px] text-[#6ffbbe] font-medium truncate">
-                Google Sheets Registrations Active
-              </span>
+      {/* Top Excel & Spreadsheet Fast Export Bar */}
+      <div className="px-4 pb-2">
+        <div className="bg-[#171f33] border border-[#2d3449] rounded-xl px-3 py-2 shadow-sm flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-6 h-6 rounded bg-[#107C41]/30 border border-[#107C41]/60 flex items-center justify-center text-[#6ffbbe] shrink-0">
+              <span className="material-symbols-outlined text-[16px]">table_view</span>
             </div>
+            <span className="text-[11px] text-[#dae2fd] font-semibold truncate">
+              MS Excel (.xlsx) Ready • {players.length} Registered
+            </span>
+          </div>
 
-            {sheetUrl ? (
+          {/* Hidden Excel File Input for Import */}
+          <input
+            ref={excelFileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleImportExcelFile}
+            className="hidden"
+          />
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => excelFileInputRef.current?.click()}
+              className="h-7 px-2.5 rounded-lg bg-[#222a3d] hover:bg-[#31394d] border border-[#2d3449] text-[#dae2fd] font-label-caps-sm text-[10px] uppercase font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              title="Import player roster from Microsoft Excel (.xlsx)"
+            >
+              <span className="material-symbols-outlined text-[14px] text-[#c3f400]">upload_file</span>
+              <span>Import</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportExcel}
+              disabled={players.length === 0}
+              className="h-7 px-2.5 rounded-lg bg-[#107C41] hover:bg-[#107C41]/80 disabled:opacity-40 text-white font-label-caps-sm text-[10px] uppercase font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+              title="Download full player database in Microsoft Excel (.xlsx)"
+            >
+              <span className="material-symbols-outlined text-[13px]">download</span>
+              <span>Export (.xlsx)</span>
+            </button>
+
+            {sheetUrl && (
               <a
                 href={sheetUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="font-label-caps-sm text-[10px] uppercase tracking-wider text-[#c3f400] hover:underline flex items-center gap-0.5 shrink-0 font-bold"
+                className="font-label-caps-sm text-[10px] uppercase text-[#c3f400] hover:underline flex items-center gap-0.5"
+                title="Open cloud Google Sheet"
               >
-                <span>Open Google Sheet</span>
-                <span className="material-symbols-outlined text-[12px]">open_in_new</span>
+                <span>Sheets ↗</span>
               </a>
-            ) : (
-              <button
-                type="button"
-                onClick={onGoogleSignIn}
-                className="font-label-caps-sm text-[10px] uppercase text-[#c3f400] underline"
-              >
-                Connect Sheet
-              </button>
             )}
           </div>
         </div>
-      )}
+      </div>
 
       {/* Top Session Context Banner */}
       <section className="px-4 flex flex-col gap-2">
@@ -450,20 +507,39 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
             </span>
           </button>
 
+          {/* Direct MS Excel .xlsx export button */}
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={players.length === 0}
+            className={`h-11 px-3 border rounded-lg font-label-caps-md text-[13px] uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-sm transition-all shrink-0 ${
+              players.length > 0
+                ? 'bg-[#107C41] border-[#107C41] text-white hover:bg-[#107C41]/85 cursor-pointer active:scale-98'
+                : 'bg-[#131b2e] border-[#222a3d] text-[#bfc5e4]/40 cursor-not-allowed'
+            }`}
+            title="Export all registrations to Microsoft Excel (.xlsx)"
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              table_view
+            </span>
+            <span>Excel (.xlsx)</span>
+          </button>
+
           <button
             type="button"
             onClick={handleExportCSV}
             disabled={metrics.total === 0}
-            className={`h-11 px-3.5 border rounded-lg font-label-caps-md text-[13px] uppercase tracking-wider flex items-center justify-center gap-1 shadow-sm transition-all shrink-0 ${
+            className={`h-11 px-3 border rounded-lg font-label-caps-md text-[13px] uppercase tracking-wider flex items-center justify-center gap-1 shadow-sm transition-all shrink-0 ${
               metrics.total > 0
                 ? 'bg-[#222a3d] border-[#2d3449] text-[#bfc5e4] hover:text-[#dae2fd] cursor-pointer active:scale-98'
                 : 'bg-[#131b2e] border-[#222a3d] text-[#bfc5e4]/40 cursor-not-allowed'
             }`}
+            title="Export current squad attendance as CSV"
           >
             <span className="material-symbols-outlined text-[18px]">
               file_download
             </span>
-            <span>Export CSV</span>
+            <span>CSV</span>
           </button>
         </div>
 
@@ -517,7 +593,7 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
               Tactical Roll Call
             </span>
             <span className="px-2 py-0.5 bg-[#222a3d] text-[#c3f400] rounded-full font-label-caps-sm text-[10px] font-bold">
-              LIVE ROSTER
+              {selectedSquad} ROSTER
             </span>
           </div>
           <span className="font-label-caps-sm text-[11px] text-[#bfc5e4] uppercase tracking-wider">
@@ -533,20 +609,31 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
             </div>
 
             <h4 className="font-headline-md text-lg uppercase text-[#dae2fd] mb-1">
-              Roster Ready For New Registrations
+              No Players Yet in {selectedSquad}
             </h4>
             <p className="font-body-sm text-xs text-[#bfc5e4] max-w-xs mb-4 leading-relaxed">
-              All previous records have been cleared. As players enroll through the Register tab, their passes and attendance will automatically appear here and sync to Google Sheets.
+              When new players register in this age category, their details (Name, Position, Age Division) will immediately appear here for touchline roll call.
             </p>
 
-            <button
-              type="button"
-              onClick={onGoToRegistration}
-              className="px-4 py-2.5 rounded-lg bg-[#c3f400] text-[#161e00] font-headline-md text-sm uppercase tracking-wider font-extrabold flex items-center gap-1.5 shadow-[0_0_16px_rgba(195,244,0,0.3)] hover:shadow-[0_0_22px_rgba(195,244,0,0.45)] transition-all cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">person_add</span>
-              <span>Register First Player</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={onGoToRegistration}
+                className="px-4 py-2.5 rounded-lg bg-[#c3f400] text-[#161e00] font-headline-md text-sm uppercase tracking-wider font-extrabold flex items-center gap-1.5 shadow-[0_0_16px_rgba(195,244,0,0.3)] hover:shadow-[0_0_22px_rgba(195,244,0,0.45)] transition-all cursor-pointer active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[18px]">person_add</span>
+                <span>Register New Player</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => excelFileInputRef.current?.click()}
+                className="px-4 py-2.5 rounded-lg bg-[#222a3d] hover:bg-[#31394d] border border-[#2d3449] text-[#dae2fd] font-headline-md text-sm uppercase tracking-wider font-extrabold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[18px] text-[#c3f400]">upload_file</span>
+                <span>Import Excel (.xlsx)</span>
+              </button>
+            </div>
           </div>
         ) : (
           sortedSquadPlayers.map((player) => {
@@ -583,7 +670,7 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
                   className={`absolute left-0 top-0 bottom-0 w-1 ${borderBarClass}`}
                 ></div>
 
-                {/* Top: Avatar, Name, Position & Tactical Status Pill */}
+                {/* Top: Avatar, Name, Position & Age Category details */}
                 <div className="flex items-center justify-between gap-3">
                   <div
                     onClick={() => onOpenPlayerModal(player)}
@@ -615,13 +702,19 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-2 text-[#bfc5e4]">
-                        <span className="font-label-caps-sm text-[11px] uppercase">
+                      <div className="flex items-center gap-1.5 text-[#bfc5e4] flex-wrap">
+                        {/* Primary Position */}
+                        <span className="font-label-caps-sm text-[11px] uppercase text-[#c3f400] font-bold">
                           {player.positionFull}
                         </span>
                         <span className="text-[#444933]">•</span>
-                        <span className="font-label-caps-sm text-[11px] uppercase text-[#c3f400] font-bold">
-                          {player.seasonFitRate}% Season Fit
+                        {/* Age Category / Division */}
+                        <span className="font-label-caps-sm text-[11px] uppercase text-[#6ffbbe] font-semibold">
+                          {player.division || player.squadCategory}
+                        </span>
+                        <span className="text-[#444933]">•</span>
+                        <span className="font-label-caps-sm text-[11px] uppercase text-[#bfc5e4]">
+                          {player.seasonFitRate}% Fit
                         </span>
                       </div>
                     </div>
@@ -750,10 +843,10 @@ export const AttendanceScreen: React.FC<AttendanceScreenProps> = ({
             <div className="w-2.5 h-2.5 rounded-full bg-[#6ffbbe] shadow-[0_0_8px_rgba(111,251,190,0.6)] animate-pulse shrink-0"></div>
             <div className="flex flex-col min-w-0">
               <span className="font-body-sm text-xs md:text-sm text-[#dae2fd] font-medium truncate">
-                Synced with Touchline Cloud &amp; Google Sheets
+                Touchline Cloud &amp; MS Excel Database
               </span>
               <span className="font-label-caps-sm text-[11px] text-[#bfc5e4] truncate">
-                {metrics.present} / {metrics.total} Players Confirmed
+                {metrics.present} / {metrics.total} in {selectedSquad} Marked
               </span>
             </div>
           </div>
